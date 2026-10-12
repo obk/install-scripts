@@ -5,7 +5,8 @@
 # Asks for settings (press Enter to accept the [default]), shows a summary,
 # and only changes the system after you confirm. Steps:
 #   1. Update packages
-#   2. Create a sudo user (password required) and copy root's SSH keys to it
+#   2. Create a sudo user (password required) and copy root's SSH keys to it,
+#      plus (optional) a GitHub user's public keys
 #   3. Tailscale (optional): join tailnet, optionally make SSH tailnet-only
 #   4. SSH: disable root login / password auth, optional port change
 #   5. UFW firewall: deny incoming by default, allow SSH + chosen ports
@@ -59,6 +60,15 @@ ask_yn() {
   done
 }
 
+# github_keys USER: USER's public SSH keys from github.com, tagged github:USER.
+# Only bare "type key" lines, so no authorized_keys options (command=, from=...)
+# can come along.
+github_keys() {
+  curl -fsS --proto '=https' --max-time 20 "https://github.com/$1.keys" \
+    | grep -E '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*$' \
+    | sed "s/\$/ github:$1/"
+}
+
 # ------------------------------ Validators ----------------------------------
 
 valid_user() {
@@ -84,6 +94,22 @@ valid_time() {
 valid_hostname() {
   [[ $1 =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && return
   warn "Use letters, digits and '-' (max 63 chars, no leading/trailing '-')."; return 1
+}
+# GitHub username or "none"; sets GH_KEYS to the user's keys (empty for "none")
+valid_github_user() {
+  GH_KEYS=""
+  [[ $1 == none ]] && return
+  if ! [[ $1 =~ ^[A-Za-z0-9](-?[A-Za-z0-9]){0,38}$ ]]; then
+    warn "Not a GitHub username. Enter one, or 'none' to skip."; return 1
+  fi
+  if ! command -v curl &>/dev/null; then
+    warn "curl is not installed (apt-get install curl), or answer 'none'."; return 1
+  fi
+  if ! GH_KEYS=$(github_keys "$1"); then
+    warn "No SSH keys found for '$1' on GitHub (or github.com is unreachable)."; return 1
+  fi
+  log "Keys of GitHub user '$1':"
+  ssh-keygen -lf - <<<"$GH_KEYS" | sed 's/^/    /'
 }
 # Space/comma separated list like "80 443/tcp 51820/udp" (empty = none)
 valid_ports_list() {
@@ -128,15 +154,19 @@ printf '\e[1mUbuntu VPS hardening\e[0m — press Enter to accept the [default].\
 
 hdr "User"
 ask NEW_USER "Name of the sudo user to create/use" "deploy" valid_user
+ask GH_USER "GitHub user to import SSH keys from ('none' to skip)" "none" valid_github_user
+HAVE_KEYS=$HAVE_ROOT_KEYS
+[[ -n $GH_KEYS ]] && HAVE_KEYS=true
 
 hdr "SSH"
 ask SSH_PORT "SSH port" "$CURRENT_SSH_PORT" valid_port
 ask_yn SSH_NO_ROOT "Disable root login over SSH?" y
-if $HAVE_ROOT_KEYS; then
+if $HAVE_KEYS; then
   ask_yn SSH_KEY_ONLY "Disable password login (SSH keys only)?" y
 else
-  warn "$ROOT_KEYS is missing or empty: password login will stay enabled"
-  warn "to avoid locking you out. Add your key and re-run to enable key-only."
+  warn "$ROOT_KEYS is missing or empty and no GitHub keys were imported:"
+  warn "password login will stay enabled to avoid locking you out."
+  warn "Add your key and re-run to enable key-only."
   SSH_KEY_ONLY=false
 fi
 
@@ -219,6 +249,7 @@ yn() { $1 && echo yes || echo no; }
 hdr "Summary"
 cat <<EOF
   Sudo user:           $NEW_USER (password required for sudo)
+  GitHub keys:         $([[ -n $GH_KEYS ]] && echo "$(wc -l <<<"$GH_KEYS") from $GH_USER" || echo none)
   SSH port:            $SSH_PORT$( [[ $SSH_PORT != "$CURRENT_SSH_PORT" ]] && echo "  (changing from $CURRENT_SSH_PORT)")
   Disable root login:  $(yn "$SSH_NO_ROOT")
   Key-only SSH:        $(yn "$SSH_KEY_ONLY")
@@ -243,7 +274,7 @@ cat <<EOF
   Extra hardening:     $(yn "$DO_EXTRA")
 EOF
 
-if $SSH_NO_ROOT && ! $HAVE_ROOT_KEYS; then
+if $SSH_NO_ROOT && ! $HAVE_KEYS; then
   warn "Root login will be disabled and no SSH keys exist: you will log in as"
   warn "'$NEW_USER' with its password."
 fi
@@ -290,15 +321,25 @@ else
   fi
 fi
 
-if $HAVE_ROOT_KEYS; then
-  log "Copying root's authorized_keys to '$NEW_USER'..."
+if $HAVE_KEYS; then
   USER_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
+  AUTH_KEYS="$USER_HOME/.ssh/authorized_keys"
   install -d -m 700 -o "$NEW_USER" -g "$NEW_USER" "$USER_HOME/.ssh"
-  touch "$USER_HOME/.ssh/authorized_keys"
-  # Merge root's keys without duplicating existing ones
-  sort -u "$USER_HOME/.ssh/authorized_keys" "$ROOT_KEYS" -o "$USER_HOME/.ssh/authorized_keys"
-  chown "$NEW_USER:$NEW_USER" "$USER_HOME/.ssh/authorized_keys"
-  chmod 600 "$USER_HOME/.ssh/authorized_keys"
+  touch "$AUTH_KEYS"
+  if $HAVE_ROOT_KEYS; then
+    log "Copying root's authorized_keys to '$NEW_USER'..."
+    # Merge root's keys without duplicating existing ones
+    sort -u "$AUTH_KEYS" "$ROOT_KEYS" -o "$AUTH_KEYS"
+  fi
+  if [[ -n $GH_KEYS ]]; then
+    log "Adding GitHub user '$GH_USER''s keys to '$NEW_USER'..."
+    # Skip keys already present (compared without their comment)
+    NEW_KEYS=$(awk 'FILENAME == ARGV[1] { have[$1 " " $2]; next } !(($1 " " $2) in have)' \
+      "$AUTH_KEYS" - <<<"$GH_KEYS")
+    [[ -n $NEW_KEYS ]] && printf '%s\n' "$NEW_KEYS" >> "$AUTH_KEYS"
+  fi
+  chown "$NEW_USER:$NEW_USER" "$AUTH_KEYS"
+  chmod 600 "$AUTH_KEYS"
 fi
 
 # ---------------------------- 3. Tailscale ----------------------------------

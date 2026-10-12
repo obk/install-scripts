@@ -6,7 +6,7 @@ You need:
 
 - a Raspberry Pi running **Raspberry Pi OS Lite 64-bit**
 - an **Ethernet** connection (Wi-Fi gets turned off)
-- an **SSH key** (password login gets turned off)
+- an **SSH key** (password login gets turned off). The script can import it from your GitHub account (`https://github.com/<user>.keys`, ed25519 and RSA keys only).
 
 ## Setup
 

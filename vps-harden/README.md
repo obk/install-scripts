@@ -6,7 +6,7 @@ You need:
 
 - a VPS running **Ubuntu 22.04, 24.04 or 26.04** (other versions get a warning)
 - **root** access over SSH
-- your **SSH key** in `/root/.ssh/authorized_keys` (most providers put it there when you create the server). Without it, password login stays on so you don't get locked out.
+- your **SSH key** in `/root/.ssh/authorized_keys` (most providers put it there when you create the server), or on your GitHub account: the script can import the keys from `https://github.com/<user>.keys`. Without either, password login stays on so you don't get locked out.
 
 ## Setup
 
@@ -35,7 +35,7 @@ You need:
 ## What it does
 
 1. **Packages** are updated.
-2. **A sudo user** (`deploy` by default) is created. It gets root's SSH keys and needs its password for sudo.
+2. **A sudo user** (`deploy` by default) is created. It gets root's SSH keys, plus your GitHub account's public keys if you give a GitHub username, and needs its password for sudo.
 3. **Tailscale** (optional) joins your tailnet. You can make SSH reachable over Tailscale only, so it's closed to the internet.
 4. **SSH** allows key login only, and root can't log in. Forwarding (agent, TCP, X11) is off, and logins are logged with the key used.
 5. **The firewall** (ufw) blocks everything coming in except SSH (rate-limited) and the ports you list.

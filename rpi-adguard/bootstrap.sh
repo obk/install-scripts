@@ -24,7 +24,7 @@ AGH_TLS=/etc/adguardhome/tls
 # Personal defaults for the questions below; every one is optional. Unset ones
 # are derived from the running system once the answers they depend on are known.
 DEFAULT_HOST_NAME="" DEFAULT_ADMIN_USER="" DEFAULT_TIMEZONE="" DEFAULT_LAN_CIDR=""
-DEFAULT_DNS_SUBNETS="" DEFAULT_ADMIN_SUBNETS="" DEFAULT_TAILSCALE=""
+DEFAULT_DNS_SUBNETS="" DEFAULT_ADMIN_SUBNETS="" DEFAULT_TAILSCALE="" DEFAULT_GITHUB_USER=""
 if [[ -f "$REPO_DIR/local.env" ]]; then
   # shellcheck source=local.env.example
   source "$REPO_DIR/local.env"
@@ -37,7 +37,7 @@ TAILNET_CIDR=100.64.0.0/10
 TS_SYSCTL=/etc/sysctl.d/91-tailscale-dns.conf
 
 # Answers to the questions below.
-HOST_NAME="" TIMEZONE="" ADMIN_USER="" NET_IFACE="" LAN_CIDR="" GATEWAY=""
+HOST_NAME="" TIMEZONE="" GITHUB_USER="" GH_KEYS="" ADMIN_USER="" NET_IFACE="" LAN_CIDR="" GATEWAY=""
 DNS_SUBNETS="" ADMIN_SUBNETS="" TAILSCALE=""
 AGH_ADMIN_USER="" AGH_ADMIN_PASSWORD="" RENDER_AGH_CONFIG=0
 
@@ -90,11 +90,21 @@ ask() {
 
 is_hostname() { [[ $1 =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || bad "use lowercase letters, digits and '-'"; }
 is_timezone() { timedatectl list-timezones | grep -xF -- "$1" >/dev/null || bad "unknown timezone (see: timedatectl list-timezones)"; }
+# Sets GH_KEYS to the user's keys, or empty for "none".
+is_github_user() {
+  GH_KEYS=""
+  [[ $1 != none ]] || return 0
+  [[ $1 =~ ^[A-Za-z0-9](-?[A-Za-z0-9]){0,38}$ ]] || bad "not a GitHub username (or 'none')" || return
+  command -v curl >/dev/null || bad "curl is not installed; add the key by hand or answer 'none'" || return
+  GH_KEYS="$(github_keys "$1")" \
+    || bad "no ed25519 or RSA keys for $1 on GitHub (or github.com unreachable)" || return
+  ssh-keygen -lf - <<< "$GH_KEYS" | sed 's/^/    /'
+}
 is_ssh_user() {
   [[ $1 != root ]] || bad "root login is disabled; use a regular sudo user" || return
   id -- "$1" &>/dev/null || bad "no such user" || return
-  [[ -s "$(getent passwd "$1" | cut -d: -f6)/.ssh/authorized_keys" ]] \
-    || bad "$1 has no ~/.ssh/authorized_keys; add a key first, password login gets disabled"
+  [[ -n "$GH_KEYS" || -s "$(getent passwd "$1" | cut -d: -f6)/.ssh/authorized_keys" ]] \
+    || bad "$1 has no ~/.ssh/authorized_keys and no GitHub keys were imported; add a key first, password login gets disabled"
 }
 is_ethernet() {
   [[ -e /sys/class/net/$1 ]] || bad "no such interface" || return
@@ -144,6 +154,15 @@ ssh_client_ip() {
   done
 }
 
+# github_keys USER: USER's public SSH keys from github.com, tagged github:USER.
+# Only bare "type key" lines of the types sshd accepts here (ed25519, RSA), so
+# no authorized_keys options (command=, from=...) can come along.
+github_keys() {
+  curl -fsS --proto '=https' --max-time 20 "https://github.com/$1.keys" \
+    | grep -E '^(ssh-ed25519|sk-ssh-ed25519@openssh\.com|ssh-rsa) [A-Za-z0-9+/]+=*$' \
+    | sed "s/\$/ github:$1/"
+}
+
 # password_matches USER PASSWORD: PASSWORD is USER's login password. Both go to
 # perl through a pipe, so neither the password nor the hash shows in ps.
 password_matches() {
@@ -177,6 +196,7 @@ sudo_user="${SUDO_USER:-}"
 
 ask HOST_NAME  "Hostname"                "${DEFAULT_HOST_NAME:-$(hostname)}"  is_hostname
 ask TIMEZONE   "Timezone"                "${DEFAULT_TIMEZONE:-${current_tz:-Etc/UTC}}" is_timezone
+ask GITHUB_USER "GitHub user to import SSH keys from (none: skip)" "${DEFAULT_GITHUB_USER:-none}" is_github_user
 ask ADMIN_USER "SSH user (key login)"    "${DEFAULT_ADMIN_USER:-$sudo_user}" is_ssh_user
 ask NET_IFACE  "Ethernet interface"      "$default_iface"     is_ethernet
 
@@ -269,7 +289,8 @@ cat <<EOF
   Hostname       $HOST_NAME
   Timezone       $TIMEZONE
   SSH user       $ADMIN_USER
-  sudo           $sudo_summary
+  GitHub keys    $([[ -n $GH_KEYS ]] && echo "$(wc -l <<< "$GH_KEYS") from $GITHUB_USER, added to $ADMIN_USER" || echo none)
+  sudo          $sudo_summary
   Interface      $NET_IFACE
   Static IP      $LAN_IP/$LAN_PREFIX   (LAN $LAN_SUBNET)
   Gateway        $GATEWAY
@@ -348,6 +369,18 @@ nmcli connection modify "$NM_CON" \
 # ---------------------------------------------------------------------------
 # 4. SSH
 # ---------------------------------------------------------------------------
+if [[ -n "$GH_KEYS" ]]; then
+  log "SSH keys from GitHub user $GITHUB_USER"
+  # Written as $ADMIN_USER, so root never follows a link planted in their home.
+  # Keys already there (compared without their comment) are skipped.
+  # shellcheck disable=SC2016 # $1 and $2 expand in the inner sh
+  printf '%s\n' "$GH_KEYS" | runuser -u "$ADMIN_USER" -- sh -c '
+    umask 077 && mkdir -p "$2/.ssh" && touch "$2/.ssh/authorized_keys" &&
+    awk "$1" "$2/.ssh/authorized_keys" - >> "$2/.ssh/authorized_keys"' sh \
+    'FILENAME == ARGV[1] { have[$1 " " $2]; next } !(($1 " " $2) in have)' \
+    "$(getent passwd "$ADMIN_USER" | cut -d: -f6)"
+fi
+
 log "SSH hardening"
 sed "s/@ADMIN_USER@/$ADMIN_USER/" "$FILES/ssh/10-hardening.conf" > /etc/ssh/sshd_config.d/10-hardening.conf
 chmod 0644 /etc/ssh/sshd_config.d/10-hardening.conf
