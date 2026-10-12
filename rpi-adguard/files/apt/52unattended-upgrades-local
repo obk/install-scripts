@@ -1,0 +1,14 @@
+// Installed to /etc/apt/apt.conf.d/52unattended-upgrades-local by bootstrap.sh.
+// Debian security origins come from the stock 50unattended-upgrades; add the
+// Raspberry Pi repo so kernel/firmware fixes are applied too. The Tailscale repo
+// is added by 53unattended-upgrades-tailscale, only when Tailscale is used.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Raspberry Pi Foundation,codename=${distro_codename},label=Raspberry Pi Foundation";
+};
+
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+Unattended-Upgrade::SyslogEnable "true";

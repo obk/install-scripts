@@ -1,0 +1,13 @@
+## Installed to /etc/audit/rules.d/hardening.rules by bootstrap.sh.
+## Changes to accounts, sudo, SSH and the AdGuard Home binary, and commands that
+## logged-in users run as root. Search with: ausearch -i -k <key>
+-w /etc/passwd -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+-w /etc/ssh/sshd_config -p wa -k sshd
+-w /etc/ssh/sshd_config.d/ -p wa -k sshd
+-w /opt/AdGuardHome/AdGuardHome -p wa -k adguardhome
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=unset -k root-commands

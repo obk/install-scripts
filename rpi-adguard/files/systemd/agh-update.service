@@ -1,0 +1,22 @@
+[Unit]
+Description=Update AdGuard Home to the latest release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/agh-update
+# Oneshot units have no start timeout by default; a hung run would block every later one.
+# Above the worst case of the bounded downloads: 3 requests x 4 attempts x 120s.
+TimeoutStartSec=30min
+# Needs root to replace the binary and restart the service; keep the rest locked down.
+# Writable: the binary, the live config (only ever written as adguardhome) and the backups.
+ProtectSystem=strict
+ReadWritePaths=/opt/AdGuardHome /var/lib/adguardhome -/var/backups/adguardhome
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

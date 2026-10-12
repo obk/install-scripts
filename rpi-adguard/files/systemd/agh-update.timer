@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly AdGuard Home update
+
+[Timer]
+# 02:30-03:00, before apt-daily-upgrade (06:00) and the unattended-upgrades reboot (04:30).
+OnCalendar=Sun 02:30
+RandomizedDelaySec=30m
+# A missed run is not caught up at boot, so updates only ever happen at night.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

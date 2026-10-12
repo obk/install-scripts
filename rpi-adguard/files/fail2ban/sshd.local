@@ -1,0 +1,18 @@
+# Installed to /etc/fail2ban/jail.d/sshd.local by bootstrap.sh.
+[DEFAULT]
+# sshd logs to the journal on Raspberry Pi OS; there is no /var/log/auth.log.
+backend = systemd
+banaction = ufw
+bantime = 1h
+bantime.increment = true
+bantime.maxtime = 1w
+findtime = 10m
+maxretry = 3
+# @ADMIN_SUBNETS@ is replaced at install time. Key-only login makes brute force
+# from the admin networks pointless, while an ssh-agent with more keys than
+# MaxAuthTries would otherwise get the admin banned for up to a week.
+ignoreip = 127.0.0.1/8 @ADMIN_SUBNETS@
+
+[sshd]
+enabled = true
+mode = aggressive

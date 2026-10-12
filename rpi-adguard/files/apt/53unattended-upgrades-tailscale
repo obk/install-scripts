@@ -1,0 +1,6 @@
+// Installed to /etc/apt/apt.conf.d/53unattended-upgrades-tailscale by bootstrap.sh,
+// only when Tailscale is used: applies Tailscale's updates automatically too.
+// apt appends this list to the Origins-Pattern of the other files.
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Tailscale,codename=${distro_codename},label=Tailscale";
+};

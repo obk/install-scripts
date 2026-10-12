@@ -1,0 +1,2 @@
+rpi-adguard/local.env*
+!rpi-adguard/local.env.example
