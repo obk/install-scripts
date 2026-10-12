@@ -10,7 +10,7 @@ You need:
 
 ## Setup
 
-1. Flash Pi OS Lite with Raspberry Pi Imager. In the settings, set a hostname, create a user and add your SSH public key.
+1. Flash Pi OS Lite with Raspberry Pi Imager. In the settings, set a hostname, create a user and add your SSH public key. If your key is on GitHub, you can skip adding it here and let the script import it (see step 2), but you need password login to SSH in the first time.
 2. Plug the Pi in, SSH into it and run:
 
    ```sh
@@ -20,6 +20,8 @@ You need:
    ```
 
    The script asks a few questions, like the hostname, a static IP and a web UI password. Each one has a default, so you can usually just press Enter. Nothing changes until you confirm the summary at the end.
+
+   To import your SSH keys from GitHub, enter your GitHub username when asked (the default `none` skips this). The script shows the keys' fingerprints so you can check them, and adds them to your user. Only ed25519 and RSA keys are used.
 
    It also asks for your user's password (the one you set in Imager), because sudo will ask for it from now on. If you don't remember it, leave it empty and set a new one.
 

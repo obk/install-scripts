@@ -19,6 +19,8 @@ You need:
 
    The script asks a few questions, like the name of the sudo user and which ports to open. Each one has a default, so you can usually just press Enter. Nothing changes until you confirm the summary at the end.
 
+   To import your SSH keys from GitHub, enter your GitHub username when asked (the default `none` skips this). The script shows the keys' fingerprints so you can check them, and adds them to the new user next to root's keys.
+
 2. It asks you to set a password for the new user. You need it for `sudo`.
 
 3. **Don't close the root session yet.** Open a new terminal and check that you can log in and use sudo:
