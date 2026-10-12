@@ -1,4 +1,4 @@
-# installers
+# install-scripts
 
 Scripts that set up and lock down small servers. Each one asks a few questions, shows a summary and only changes the system after you confirm.
 
@@ -10,5 +10,5 @@ Scripts that set up and lock down small servers. Each one asks a few questions, 
 Each folder has its own README with setup steps.
 
 ```sh
-git clone https://github.com/obk/installers.git
+git clone https://git.obk.dev/install-scripts
 ```
