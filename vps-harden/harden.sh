@@ -6,7 +6,7 @@
 # and only changes the system after you confirm. Steps:
 #   1. Update packages
 #   2. Create a sudo user (password required) and copy root's SSH keys to it,
-#      plus (optional) a GitHub user's public keys
+#      plus (optional) a GitHub user's public keys, synced hourly by a timer
 #   3. Tailscale (optional): join tailnet, optionally make SSH tailnet-only
 #   4. SSH: disable root login / password auth, optional port change
 #   5. UFW firewall: deny incoming by default, allow SSH + chosen ports
@@ -67,6 +67,107 @@ github_keys() {
   curl -fsS --proto '=https' --max-time 20 "https://github.com/$1.keys" \
     | grep -E '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*$' \
     | sed "s/\$/ github:$1/"
+}
+
+# install_github_keys_sync: /usr/local/sbin/github-keys-sync and its hourly timer.
+# Reads GITHUB_USER and SSH_USER from /etc/default/github-keys-sync.
+install_github_keys_sync() {
+  cat > /usr/local/sbin/github-keys-sync <<'EOF'
+#!/usr/bin/env bash
+# Managed by harden.sh
+# Keep the SSH user's GitHub keys in step with https://github.com/<user>.keys.
+# Run hourly by github-keys-sync.timer; settings in /etc/default/github-keys-sync.
+#
+# Keys tagged "github:<user>" in authorized_keys belong to this script: they are
+# replaced by the current set from GitHub, so a key added or removed there is
+# added or removed here. Keys without that tag are never touched. If GitHub
+# can't be reached or lists no usable keys, nothing changes, so an outage or an
+# emptied account can't lock you out.
+set -euo pipefail
+
+CONF=/etc/default/github-keys-sync
+
+log() { printf 'github-keys-sync: %s\n' "$*"; }
+die() { printf 'github-keys-sync: ERROR: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "run as root"
+[[ -f $CONF ]] || die "$CONF is missing; run harden.sh first"
+GITHUB_USER="" SSH_USER=""
+# shellcheck source=/dev/null
+. "$CONF"
+[[ $GITHUB_USER =~ ^[A-Za-z0-9](-?[A-Za-z0-9]){0,38}$ ]] || die "GITHUB_USER in $CONF is not a GitHub username"
+home="$(getent passwd "$SSH_USER" | cut -d: -f6)" || die "SSH_USER in $CONF is not a user"
+[[ -n $SSH_USER && -n $home ]] || die "SSH_USER in $CONF is not a user"
+
+# Only bare "type key" lines, so no authorized_keys options (command=, from=...)
+# can come along.
+keys="$(curl -fsS --proto '=https' --max-time 20 "https://github.com/$GITHUB_USER.keys" \
+  | grep -E '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+=*$' \
+  | sed "s/\$/ github:$GITHUB_USER/")" \
+  || die "no SSH keys for $GITHUB_USER on GitHub (or github.com unreachable); keeping the current keys"
+
+# Read and written as SSH_USER, so root never follows a link planted in their home.
+# shellcheck disable=SC2016 # $1 expands in the inner sh
+current="$(runuser -u "$SSH_USER" -- sh -c '[ ! -e "$1" ] || cat -- "$1"' sh "$home/.ssh/authorized_keys")" \
+  || die "cannot read $home/.ssh/authorized_keys"
+
+# Drop every github:* key (also those of a GitHub user configured before), keep
+# the rest, then add GitHub's current keys that aren't already there untagged.
+new="$(awk 'FILENAME == ARGV[1] { if (!(NF == 3 && $3 ~ /^github:/)) { print; have[$1 " " $2] }; next }
+            !(($1 " " $2) in have)' <(printf '%s' "$current") - <<< "$keys")"
+[[ $new != "$current" ]] || exit 0
+
+# Log what changed, by fingerprint.
+tagged() { awk 'NF == 3 && $3 ~ /^github:/' <<< "$1" | sort; }
+old_set="$(tagged "$current")" new_set="$(tagged "$new")"
+fingerprints() { [[ -z $2 ]] || ssh-keygen -lf - <<< "$2" | sed "s/^/$1 /"; }
+fingerprints removed "$(comm -23 <(printf '%s\n' "$old_set") <(printf '%s\n' "$new_set") | sed '/^$/d')"
+fingerprints added "$(comm -13 <(printf '%s\n' "$old_set") <(printf '%s\n' "$new_set") | sed '/^$/d')"
+
+# shellcheck disable=SC2016 # $1 expands in the inner sh
+runuser -u "$SSH_USER" -- sh -c 'umask 077 && mkdir -p "$1/.ssh" &&
+  cat > "$1/.ssh/authorized_keys.tmp" && mv -f -- "$1/.ssh/authorized_keys.tmp" "$1/.ssh/authorized_keys"' \
+  sh "$home" <<< "$new"
+log "updated $home/.ssh/authorized_keys from github.com/$GITHUB_USER.keys"
+EOF
+  chmod 755 /usr/local/sbin/github-keys-sync
+
+  cat > /etc/systemd/system/github-keys-sync.service <<'EOF'
+# Managed by harden.sh
+[Unit]
+Description=Sync SSH keys from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/github-keys-sync
+# Oneshot units have no start timeout by default; a hung run would block every later one.
+TimeoutStartSec=5min
+# Writes authorized_keys in the user's home, so /home stays writable (ProtectSystem=full, not strict).
+ProtectSystem=full
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# AF_NETLINK: runuser's PAM session reports to the audit log.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+EOF
+
+  cat > /etc/systemd/system/github-keys-sync.timer <<'EOF'
+# Managed by harden.sh
+[Unit]
+Description=Hourly sync of SSH keys from GitHub
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
 }
 
 # ------------------------------ Validators ----------------------------------
@@ -249,7 +350,7 @@ yn() { $1 && echo yes || echo no; }
 hdr "Summary"
 cat <<EOF
   Sudo user:           $NEW_USER (password required for sudo)
-  GitHub keys:         $([[ -n $GH_KEYS ]] && echo "$(wc -l <<<"$GH_KEYS") from $GH_USER" || echo none)
+  GitHub keys:         $([[ -n $GH_KEYS ]] && echo "$(wc -l <<<"$GH_KEYS") from $GH_USER, synced hourly" || echo none)
   SSH port:            $SSH_PORT$( [[ $SSH_PORT != "$CURRENT_SSH_PORT" ]] && echo "  (changing from $CURRENT_SSH_PORT)")
   Disable root login:  $(yn "$SSH_NO_ROOT")
   Key-only SSH:        $(yn "$SSH_KEY_ONLY")
@@ -340,6 +441,21 @@ if $HAVE_KEYS; then
   fi
   chown "$NEW_USER:$NEW_USER" "$AUTH_KEYS"
   chmod 600 "$AUTH_KEYS"
+fi
+
+GH_SYNC_CONF=/etc/default/github-keys-sync
+if [[ -n $GH_KEYS ]]; then
+  log "Syncing the GitHub keys hourly (keys added or removed on GitHub follow within the hour)..."
+  install_github_keys_sync
+  printf '# Managed by harden.sh\nGITHUB_USER=%s\nSSH_USER=%s\n' "$GH_USER" "$NEW_USER" > "$GH_SYNC_CONF"
+  chmod 644 "$GH_SYNC_CONF"
+  systemctl daemon-reload
+  systemctl enable --now github-keys-sync.timer
+elif [[ -f $GH_SYNC_CONF ]]; then
+  # Answered 'none' on a re-run: stop syncing, but keep the keys it added
+  log "Stopping the GitHub key sync (its keys stay in authorized_keys)."
+  systemctl disable --now github-keys-sync.timer 2>/dev/null || true
+  rm -f "$GH_SYNC_CONF"
 fi
 
 # ---------------------------- 3. Tailscale ----------------------------------

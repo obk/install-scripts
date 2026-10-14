@@ -35,6 +35,8 @@ HOST_DNS="9.9.9.9 149.112.112.112"
 # Tailscale's address range; tailnet devices query AdGuard Home from it via tailscale0.
 TAILNET_CIDR=100.64.0.0/10
 TS_SYSCTL=/etc/sysctl.d/91-tailscale-dns.conf
+# Settings of github-keys-sync, the hourly sync of the GitHub keys.
+GH_SYNC_CONF=/etc/default/github-keys-sync
 
 # Answers to the questions below.
 HOST_NAME="" TIMEZONE="" GITHUB_USER="" GH_KEYS="" ADMIN_USER="" NET_IFACE="" LAN_CIDR="" GATEWAY=""
@@ -289,7 +291,7 @@ cat <<EOF
   Hostname       $HOST_NAME
   Timezone       $TIMEZONE
   SSH user       $ADMIN_USER
-  GitHub keys    $([[ -n $GH_KEYS ]] && echo "$(wc -l <<< "$GH_KEYS") from $GITHUB_USER, added to $ADMIN_USER" || echo none)
+  GitHub keys    $([[ -n $GH_KEYS ]] && echo "$(wc -l <<< "$GH_KEYS") from $GITHUB_USER, added to $ADMIN_USER, synced hourly" || echo none)
   sudo          $sudo_summary
   Interface      $NET_IFACE
   Static IP      $LAN_IP/$LAN_PREFIX   (LAN $LAN_SUBNET)
@@ -379,6 +381,23 @@ if [[ -n "$GH_KEYS" ]]; then
     awk "$1" "$2/.ssh/authorized_keys" - >> "$2/.ssh/authorized_keys"' sh \
     'FILENAME == ARGV[1] { have[$1 " " $2]; next } !(($1 " " $2) in have)' \
     "$(getent passwd "$ADMIN_USER" | cut -d: -f6)"
+
+  log "Hourly sync of the GitHub keys"
+  # Keys added or removed on GitHub are added or removed here within the hour.
+  install -m 0755 "$FILES/ssh/github-keys-sync.sh" /usr/local/sbin/github-keys-sync
+  printf '# Managed by bootstrap.sh\nGITHUB_USER=%s\nSSH_USER=%s\n' "$GITHUB_USER" "$ADMIN_USER" \
+    > "$GH_SYNC_CONF"
+  chmod 0644 "$GH_SYNC_CONF"
+  for unit in github-keys-sync.service github-keys-sync.timer; do
+    install -m 0644 "$FILES/systemd/$unit" "/etc/systemd/system/$unit"
+  done
+  systemctl daemon-reload
+  systemctl enable --now github-keys-sync.timer
+elif [[ -f "$GH_SYNC_CONF" ]]; then
+  # Answered 'none' on a re-run: stop syncing, but keep the keys it added.
+  log "Stopping the GitHub key sync (its keys stay in authorized_keys)"
+  systemctl disable --now github-keys-sync.timer 2>/dev/null || true
+  rm -f "$GH_SYNC_CONF"
 fi
 
 log "SSH hardening"

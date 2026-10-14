@@ -23,6 +23,8 @@ You need:
 
    To import your SSH keys from GitHub, enter your GitHub username when asked (the default `none` skips this). The script shows the keys' fingerprints so you can check them, and adds them to your user. Only ed25519 and RSA keys are used.
 
+   After that, a timer syncs them every hour: a key you add to or remove from GitHub is added or removed on the Pi within the hour. Only keys the script imported (tagged `github:<user>`) are changed; other keys in `authorized_keys` stay. If GitHub can't be reached or lists no keys, nothing changes. Keep in mind that anyone who can add a key to your GitHub account can then log in to the Pi. Answer `none` on a later run to stop syncing (the imported keys stay).
+
    It also asks for your user's password (the one you set in Imager), because sudo will ask for it from now on. If you don't remember it, leave it empty and set a new one.
 
 3. On your router:
@@ -72,6 +74,7 @@ sudo ./bootstrap.sh --reset-agh-config
 sudo ausearch -i -k root-commands   # commands run as root (also: identity, sudoers, sshd, adguardhome)
 sudo lastcomm                       # recent commands from process accounting
 sudo debsums -s                     # files that differ from their package (no output = fine)
+sudo github-keys-sync               # sync the GitHub keys now (journalctl -u github-keys-sync: past runs)
 ```
 
 ## AdGuard Home updates

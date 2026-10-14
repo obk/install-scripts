@@ -1,0 +1,19 @@
+[Unit]
+Description=Sync SSH keys from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/github-keys-sync
+# Oneshot units have no start timeout by default; a hung run would block every later one.
+TimeoutStartSec=5min
+# Writes authorized_keys in the user's home, so /home stays writable (ProtectSystem=full, not strict).
+ProtectSystem=full
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# AF_NETLINK: runuser's PAM session reports to the audit log.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK

@@ -21,6 +21,8 @@ You need:
 
    To import your SSH keys from GitHub, enter your GitHub username when asked (the default `none` skips this). The script shows the keys' fingerprints so you can check them, and adds them to the new user next to root's keys.
 
+   After that, a timer syncs them every hour: a key you add to or remove from GitHub is added or removed on the server within the hour. Only keys the script imported (tagged `github:<user>`) are changed; root's keys and others in `authorized_keys` stay. If GitHub can't be reached or lists no keys, nothing changes. Keep in mind that anyone who can add a key to your GitHub account can then log in to the server. Answer `none` on a later run to stop syncing (the imported keys stay).
+
 2. It asks you to set a password for the new user. You need it for `sudo`.
 
 3. **Don't close the root session yet.** Open a new terminal and check that you can log in and use sudo:
@@ -37,7 +39,7 @@ You need:
 ## What it does
 
 1. **Packages** are updated.
-2. **A sudo user** (`deploy` by default) is created. It gets root's SSH keys, plus your GitHub account's public keys if you give a GitHub username, and needs its password for sudo.
+2. **A sudo user** (`deploy` by default) is created. It gets root's SSH keys, plus your GitHub account's public keys if you give a GitHub username (kept in sync every hour), and needs its password for sudo.
 3. **Tailscale** (optional) joins your tailnet. You can make SSH reachable over Tailscale only, so it's closed to the internet.
 4. **SSH** allows key login only, and root can't log in. Forwarding (agent, TCP, X11) is off, and logins are logged with the key used.
 5. **The firewall** (ufw) blocks everything coming in except SSH (rate-limited) and the ports you list.
@@ -67,6 +69,7 @@ resolvectl status                     # DNS servers in use
 sudo ausearch -k root-commands -i     # commands run as root (also: identity, sudoers, sshd)
 sudo lastcomm                         # recent commands from process accounting
 sudo debsums -s                       # files that differ from their package (no output = fine)
+sudo github-keys-sync                 # sync the GitHub keys now (journalctl -u github-keys-sync: past runs)
 ```
 
 ## Good to know
