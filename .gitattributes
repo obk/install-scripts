@@ -1,0 +1,4 @@
+# Shell scripts and config files run on Linux: keep LF even in a Windows checkout,
+# so a copied folder (scp, USB stick) works without conversion.
+* text=auto eol=lf
+*.gpg binary
