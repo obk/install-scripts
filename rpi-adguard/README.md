@@ -14,7 +14,7 @@ You need:
 2. Plug the Pi in, SSH into it and run:
 
    ```sh
-   git clone https://git.obk.dev/install-scripts && cd install-scripts/rpi-adguard
+   git clone https://github.com/obk/install-scripts && cd install-scripts/rpi-adguard
    sudo ./bootstrap.sh
    sudo reboot
    ```

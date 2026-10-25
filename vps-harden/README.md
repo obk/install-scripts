@@ -13,7 +13,7 @@ You need:
 1. SSH into the server as root and run:
 
    ```sh
-   git clone https://git.obk.dev/install-scripts && cd install-scripts/vps-harden
+   git clone https://github.com/obk/install-scripts && cd install-scripts/vps-harden
    bash harden.sh
    ```
 

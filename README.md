@@ -10,5 +10,5 @@ Scripts that set up and lock down small servers. Each one asks a few questions, 
 Each folder has its own README with setup steps.
 
 ```sh
-git clone https://git.obk.dev/install-scripts
+git clone https://github.com/obk/install-scripts
 ```
